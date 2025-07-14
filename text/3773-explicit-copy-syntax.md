@@ -4,12 +4,10 @@
 - Rust Issue: [rust-lang/rust#0000](https://github.com/rust-lang/rust/issues/0000)
 
 # Summary
-[summary]: #summary
 
 Introduce explicit `.copy` syntax to trigger copy semantics. All value transfers default to *move*, regardless of whether the type implements `Copy`. This removes implicit behavior differences tied to `Copy` and aligns with Rust's philosophy of semantic clarity and explicitness.
 
 # Motivation
-[motivation]: #motivation
 
 Rust currently has an implicit copying behavior for types that implement the `Copy` trait, which creates several problems for users:
 
@@ -55,7 +53,6 @@ By making copies explicit, developers — especially newcomers — will more eas
 When a value is moved, the compiler prevents further use, helping avoid bugs such as accidental reuse in a loop. If a type silently becomes `Copy`, such protections disappear — and implicit reuse may lead to subtle logic errors. Requiring `.copy` makes reuse visible and intentional.
 
 # Guide-level explanation
-[guide-level-explanation]: #guide-level-explanation
 
 With explicit copy syntax, all value transfers in Rust follow move semantics by default. To copy a value, you must explicitly use the `.copy` syntax:
 
@@ -136,11 +133,14 @@ For new Rust programmers, this eliminates the need to memorize which types are `
 When migrating to a new edition that includes this feature, `cargo fix` will automatically insert `.copy` where needed to preserve existing behavior. The compiler will also provide helpful diagnostics to guide manual fixes where automatic migration isn't possible.
 
 # Reference-level explanation
-[reference-level-explanation]: #reference-level-explanation
 
 ## Syntax and Semantics
 
 The `.copy` syntax is a built-in operator, not a method call. It behaves similarly to `.await` or `?` as a syntactic construct that applies directly to a value.
+
+### Contextual Keyword
+
+The `.copy` syntax introduces `copy` as a **contextual keyword**, valid only in the context of `expr.copy`. It does not affect the ability to use `copy` as a variable, field, or function name outside of that context. This ensures backward compatibility and avoids namespace pollution.
 
 ### Grammar
 
@@ -249,7 +249,6 @@ let result = create_point().copy.translate(1, 2);
 ```
 
 # Drawbacks
-[drawbacks]: #drawbacks
 
 **Increased Verbosity**: Code that reuses `Copy` values must now do so explicitly with `.copy`. This adds syntactic overhead to common operations like arithmetic with variables.
 
@@ -260,7 +259,6 @@ let result = create_point().copy.translate(1, 2);
 **Potential for Overuse**: Developers might reflexively add `.copy` without considering whether a move would be more appropriate, potentially leading to unnecessary copies.
 
 # Rationale and alternatives
-[rationale-and-alternatives]: #rationale-and-alternatives
 
 ## Why This Design?
 
@@ -280,6 +278,7 @@ let y = copy x;
 ```
 
 **Rejected because:**
+
 - Requires a new keyword
 - Doesn't chain well with method calls
 - Less consistent with existing Rust syntax patterns
@@ -289,6 +288,7 @@ let y = copy x;
 Making `.copy` auto-dereference like method calls.
 
 **Rejected because:**
+
 - Creates ambiguity about whether you're copying a reference or the referenced value
 - Inconsistent with the goal of making ownership explicit
 - Adds complexity to the mental model
@@ -296,6 +296,7 @@ Making `.copy` auto-dereference like method calls.
 ### Status Quo (Keep Implicit Copy)
 
 **Rejected because:**
+
 - Maintains the action-at-a-distance problem
 - Keeps the cognitive burden of remembering which types are `Copy`
 - Doesn't align with Rust's general philosophy of explicit semantics
@@ -303,6 +304,7 @@ Making `.copy` auto-dereference like method calls.
 ## Impact of Not Doing This
 
 Without this change, Rust continues to have:
+
 - Implicit behavior that can silently change when traits are added/removed
 - Cognitive overhead in understanding which operations copy vs move
 - Difficulty in code review and performance analysis
@@ -311,17 +313,23 @@ Without this change, Rust continues to have:
 ## Library vs Language
 
 This cannot be implemented as a library feature because it requires compiler support to:
+
 - Override default move semantics
 - Provide the `.copy` syntax
 - Integrate with the type system and borrow checker
 
 # Prior art
-[prior-art]: #prior-art
 
-TODO
+Several languages explore the tension between implicit and explicit copying:
+
+- **Zig** uses explicit copies by default and requires the user to write `a = b;` for copying, avoiding accidental clones in ownership-sensitive contexts.
+- **Swift** makes copying semantics explicit for reference types and introduces language constructs to differentiate ownership behaviors.
+- **C++** uses implicit copy and move constructors, but has no syntax for explicitly requesting a shallow copy, which can lead to confusion and inefficiency in some generic contexts.
+- In **Rust**, tools like `clippy` offer lints for expensive implicit copies, and some developers already adopt explicit `.clone()` idioms to improve readability or performance tracking.
+
+This RFC proposes a language-level solution for the same problem domain, fully aligned with Rust’s explicitness philosophy.
 
 # Unresolved questions
-[unresolved-questions]: #unresolved-questions
 
 **Pattern Matching Syntax**: Should future RFCs introduce special syntax for copying in patterns (e.g., `match x { MyStruct { copy a, ref b } => ... }`)?
 
@@ -334,7 +342,6 @@ TODO
 **IDE Integration**: How should language servers and IDEs highlight copy operations to improve developer experience?
 
 # Future possibilities
-[future-possibilities]: #future-possibilities
 
 ## Pattern Matching Extensions
 
@@ -353,6 +360,7 @@ This would provide fine-grained control over ownership in pattern matching, simi
 ## Lint Extensions
 
 Additional lints could help identify:
+
 - Unnecessary uses of `.copy` where moves would suffice
 - Performance hotspots where many copies occur
 - Opportunities to restructure code to avoid copies
@@ -370,3 +378,4 @@ Build tools could provide reports on copy frequency and performance impact, help
 IDEs could provide visual indicators for copy operations, making them even more visible during development.
 
 This change lays the foundation for a more explicit and predictable ownership model in Rust, while maintaining backward compatibility through edition-based migration.
+
