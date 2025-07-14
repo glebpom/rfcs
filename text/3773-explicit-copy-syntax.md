@@ -320,14 +320,7 @@ This cannot be implemented as a library feature because it requires compiler sup
 
 # Prior art
 
-Several languages explore the tension between implicit and explicit copying:
-
-- **Zig** uses explicit copies by default and requires the user to write `a = b;` for copying, avoiding accidental clones in ownership-sensitive contexts.
-- **Swift** makes copying semantics explicit for reference types and introduces language constructs to differentiate ownership behaviors.
-- **C++** uses implicit copy and move constructors, but has no syntax for explicitly requesting a shallow copy, which can lead to confusion and inefficiency in some generic contexts.
-- In **Rust**, tools like `clippy` offer lints for expensive implicit copies, and some developers already adopt explicit `.clone()` idioms to improve readability or performance tracking.
-
-This RFC proposes a language-level solution for the same problem domain, fully aligned with Rust’s explicitness philosophy.
+TODO
 
 # Unresolved questions
 
