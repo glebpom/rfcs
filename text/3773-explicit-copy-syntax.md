@@ -1,25 +1,21 @@
-# RFC: Explicit Copy Syntax
+- Feature Name: `explicit_copy`
+- Start Date: 2025-07-14
+- RFC PR: [rust-lang/rfcs#0000](https://github.com/rust-lang/rfcs/pull/0000)
+- Rust Issue: [rust-lang/rust#0000](https://github.com/rust-lang/rust/issues/0000)
 
-* **Feature Name**: `explicit_copy`
-* **Start Date**: 2025-07-14
-* **RFC PR**: [rust-lang/rfcs#0000](https://github.com/rust-lang/rfcs/pull/0000)
-* **Rust Issue**: [rust-lang/rust#0000](https://github.com/rust-lang/rfcs/rust/issues/0000)
+# Summary
+[summary]: #summary
 
----
+Introduce explicit `.copy` syntax to trigger copy semantics. All value transfers default to *move*, regardless of whether the type implements `Copy`. This removes implicit behavior differences tied to `Copy` and aligns with Rust's philosophy of semantic clarity and explicitness.
 
-## Summary
+# Motivation
+[motivation]: #motivation
 
-Introduce explicit `.copy` syntax to trigger copy semantics. All value transfers default to *move*, regardless of whether the type implements `Copy`. This removes implicit behavior differences tied to `Copy` and aligns with Rust’s philosophy of semantic clarity and explicitness.
+Rust currently has an implicit copying behavior for types that implement the `Copy` trait, which creates several problems for users:
 
-> This change does **not** alter the underlying behavior of the language or how copying works. Instead, it exposes what is currently an **implicit operation** as an **explicit one**, in line with Rust’s general design principle: operations with semantic cost or meaning should be visible in code.
+## Eliminate Action-at-a-Distance
 
----
-
-## Motivation
-
-### 1. Eliminate Action-at-a-Distance
-
-Adding or removing the `Copy` trait from a type currently changes all code using that type. This can silently break carefully designed move-based APIs.
+Adding or removing the `Copy` trait from a type currently changes all code using that type. This can silently break carefully designed move-based APIs:
 
 ```rust
 #[derive(Clone)]
@@ -36,35 +32,32 @@ let x = Resource {};
 let y = x; // now it's a copy
 ```
 
-This change is invisible and potentially harmful.
+This change is invisible and potentially harmful to API consumers.
 
-### 2. Make Language-Level Behavior Explicit
+## Make Language-Level Behavior Explicit
 
-Rust already requires explicit syntax for sub-function-level operations that reflect fundamental language behavior — such as `.await` for suspension points, `?` for error propagation, and `unsafe` for bypassing safety guarantees.
+Rust already requires explicit syntax for sub-function-level operations that reflect fundamental language behavior — such as `.await` for suspension points, `?` for error propagation, and `unsafe` for bypassing safety guarantees. Implicit `Copy` behavior is similarly low-level: it controls ownership and memory transfer semantics. Making it explicit brings consistency with Rust's existing approach to exposing core language mechanics through syntax.
 
-Implicit `Copy` behavior is similarly low-level: it controls ownership and memory transfer semantics. Making it explicit brings consistency with Rust’s existing approach to exposing core language mechanics through syntax.
+## Improve Code Review and Profiling
 
-### 3. Improve Code Review and Profiling
+It's hard to see where expensive or important copies occur, especially in APIs using generic types. This makes performance analysis and code review more difficult.
 
-It's hard to see where expensive or important copies occur, especially in APIs using generic types.
+## Simplify the Mental Model
 
-### 4. Simplify the Mental Model
+Users must currently memorize which types are `Copy`. A single rule — all values move unless explicitly copied — is simpler and safer for developers to reason about.
 
-Users must currently memorize which types are `Copy`. A single rule — all values move unless explicitly copied — is simpler and safer.
-
-### 5. Improved Learning Clarity
+## Improved Learning Clarity
 
 By making copies explicit, developers — especially newcomers — will more easily understand ownership, `Copy` semantics, and the difference between `const`, literals, references, and owned values.
 
-### 6. Prevent Logical Errors from Accidental Reuse
+## Prevent Logical Errors from Accidental Reuse
 
 When a value is moved, the compiler prevents further use, helping avoid bugs such as accidental reuse in a loop. If a type silently becomes `Copy`, such protections disappear — and implicit reuse may lead to subtle logic errors. Requiring `.copy` makes reuse visible and intentional.
 
----
+# Guide-level explanation
+[guide-level-explanation]: #guide-level-explanation
 
-## Design
-
-### Syntax
+With explicit copy syntax, all value transfers in Rust follow move semantics by default. To copy a value, you must explicitly use the `.copy` syntax:
 
 ```rust
 let x = 42;
@@ -72,179 +65,308 @@ let y = x.copy; // explicit copy
 let z = x;      // move (even though i32 is Copy)
 ```
 
-### Rules
+## Basic Usage
 
-* **Move is always the default**, even for `Copy` types.
-* **`.copy` is required** to trigger a copy.
-* **Using `.copy` on a non-`Copy` type is a compile-time error**.
-* Works in function arguments and call chains:
+The `.copy` syntax works anywhere you would normally use a value:
 
 ```rust
 fn process(n: i32) {}
-process(x.copy);
 
+let x = 42;
+process(x.copy);        // pass a copy
+let result = x.copy + 5; // use in expressions
+```
+
+## Chaining
+
+The `.copy` syntax chains naturally with method calls:
+
+```rust
+let point = Point { x: 1, y: 2 };
 let result = point.copy.translate(3, 4);
 ```
 
----
+## Error Handling
 
-## Consts and Literals
+Using `.copy` on a non-`Copy` type results in a compile-time error:
 
-### Literals
+```rust
+let vec = vec![1, 2, 3];
+let copy = vec.copy; // ERROR: Vec<i32> does not implement Copy
+```
 
-Literals like `42`, `"hi"`, and `true` are embedded directly into expressions. They do **not** require `.copy`:
+## Literals and Constants
+
+Literals like `42`, `"hello"`, and `true` are embedded directly into expressions and don't require `.copy`:
 
 ```rust
 let a = 42;        // ✅ OK: literal
-let b = 1 + 2 + 3; // ✅ OK
+let b = 1 + 2 + 3; // ✅ OK: arithmetic with literals
 ```
 
-### Const Bindings
-
-`const` values are always `Copy`. To maintain consistency with normal bindings, `.copy` is required when accessing them by value:
+However, `const` values require `.copy` for consistency with normal bindings:
 
 ```rust
-const A: i32 = 100;
-let x = A.copy; // ✅ Explicit copy
+const MAX_SIZE: usize = 100;
+let limit = MAX_SIZE.copy; // ✅ Explicit copy from const
 ```
 
-This makes the distinction between values and bindings consistent, without changing `const` behavior.
+## References
 
-### Static Bindings
-
-Unlike `const`, `static` items are accessed as references to a fixed memory location. A `static` value is not itself `Copy`, but you can copy its reference, or dereference and copy the value if it supports `Copy`:
-
-```rust
-static B: i32 = 42;
-let x = &B;        // ✅ reference
-let y = x.copy;    // ✅ copy the reference
-let z = (*x).copy; // ✅ copy the value behind the reference
-```
-
-No special rule applies to `static`; `.copy` works as usual based on what the user writes.
-
----
-
-## Semantics of `.copy`
-
-### `.copy` Is Not a Function
-
-The `.copy` operator is not a function, and does not follow trait resolution. It behaves like `?` or `.await`: a syntactic construct that applies directly to a value without auto-dereferencing.
-
-This is a deliberate design decision:
-
-* It avoids subtle type-driven behavior.
-* It makes ownership transitions predictable.
-* It removes ambiguity between copying a reference and copying the underlying value.
-
-#### Example: Reference Clarity
+The `.copy` operator does not auto-dereference. It acts on the value as written:
 
 ```rust
 let a = &42;
-
 let x = a.copy;      // ✅ x: &i32 — copy the reference
 let y = (*a).copy;   // ✅ y: i32  — copy the value behind the reference
 ```
 
-`.copy` does not auto-deref — it acts on the value as written. This makes working with references significantly clearer and reinforces Rust’s principle that developers should write what they mean.
+This makes working with references clearer and reinforces Rust's principle that developers should write what they mean.
 
----
+## Impact on Reading and Understanding Code
 
-## Closure Capture Semantics
+This change makes ownership transfers explicit and visible. When reading code, you can immediately see where values are being copied versus moved. This improves code comprehension and makes performance characteristics more apparent.
 
-Using `.copy` inside closures or `async` blocks does not change capture semantics. The behavior is consistent with normal read access:
+For existing Rust programmers, this represents a shift from implicit to explicit behavior. The mental model becomes simpler: assume everything moves unless you see `.copy`.
 
-* If `.copy` is called on a variable inside a closure, it is treated as a read.
-* The closure will capture the variable **by reference** unless explicitly marked `move`.
-* If the closure is marked `move`, the variable is moved into the closure, and `.copy` applies to the moved-in value.
+For new Rust programmers, this eliminates the need to memorize which types are `Copy` and provides a consistent rule for all value transfers.
 
-Examples:
+## Migration
+
+When migrating to a new edition that includes this feature, `cargo fix` will automatically insert `.copy` where needed to preserve existing behavior. The compiler will also provide helpful diagnostics to guide manual fixes where automatic migration isn't possible.
+
+# Reference-level explanation
+[reference-level-explanation]: #reference-level-explanation
+
+## Syntax and Semantics
+
+The `.copy` syntax is a built-in operator, not a method call. It behaves similarly to `.await` or `?` as a syntactic construct that applies directly to a value.
+
+### Grammar
+
+```
+copy_expr: expr '.' 'copy'
+```
+
+### Type Checking
+
+Using `.copy` on an expression `e` of type `T` is valid if and only if `T: Copy`. The result type is `T`.
+
+### Desugaring
+
+The `.copy` operation desugars to a bitwise copy of the value, identical to the current implicit copying behavior for `Copy` types.
+
+## Interaction with Other Features
+
+### Closure Capture
+
+Using `.copy` inside closures follows normal capture rules:
 
 ```rust
 let a = MyCopyType(123);
 let closure = || {
-    let x = a.copy; // ✅ captured by reference
+    let x = a.copy; // captured by reference
 };
 
 let closure = move || {
-    let x = a.copy; // ✅ captured by move
+    let x = a.copy; // captured by move, then copied
 };
 ```
 
-This behavior is compatible with the no-auto-deref rule: `.copy` applies only to what is written, and dereferencing must be explicit.
+### Pattern Matching
 
----
-
-## Pattern Matching Semantics
-
-This RFC requires that all copies be explicit — including within pattern matching. As a result, destructuring a `Copy` type by value must use `.copy` if the user intends to copy fields. Normal move semantics remain valid:
+Pattern matching follows explicit copy semantics. To copy fields from a destructured `Copy` type, explicit `.copy` is required:
 
 ```rust
 match point {
     Point(x, y) => {
-        let x = x.copy;
-        let y = y.copy;
-        // ...
-    } // ✅ explicit copy after destructure
+        let x_copy = x.copy;
+        let y_copy = y.copy;
+        // use x_copy and y_copy
+    }
 }
 ```
 
-### Future Consideration: `copy` in Pattern Matching
+### Generics
 
-This RFC does not introduce special syntax for `copy` in patterns, but it lays the foundation for such an extension.
-
-A future RFC may explore pattern binding syntax like:
+In generic contexts, `.copy` requires a `Copy` bound:
 
 ```rust
-if let MyStruct { copy a, ref b } = value { ... }
+fn duplicate<T: Copy>(value: T) -> (T, T) {
+    (value, value.copy)
+}
 ```
 
-This would allow fine-grained control over ownership in pattern matching — similar in spirit to `ref` and the previously proposed `box` pattern syntax.
+## Const and Static Items
 
-While this pattern-level control may improve ergonomics, it is not required. Equivalent behavior can be achieved today through explicit destructuring and `.copy` calls.
+### Const Items
 
----
+`const` items require `.copy` for value access:
 
-## Migration
+```rust
+const PI: f64 = 3.14159;
+let circumference = 2.0 * PI.copy * radius;
+```
 
-This change is edition-based (e.g. **Rust 2027**).
+### Static Items
 
-### Migration Strategy
+`static` items are accessed as references. Copying follows normal reference rules:
 
-* `cargo fix --edition 2027` will automatically insert `.copy` where needed to preserve behavior.
-* If a move would be valid and preferable, the tool should favor move semantics and avoid adding `.copy`.
-* In ambiguous or sensitive contexts — such as loop reuse, closure capture, or match destructuring — `cargo fix` may choose **not** to rewrite the code automatically, instead emitting a warning or suggestion.
+```rust
+static COUNTER: AtomicUsize = AtomicUsize::new(0);
+let counter_ref = &COUNTER;     // reference to static
+let ref_copy = counter_ref.copy; // copy the reference
+```
 
-  * **Examples:**
+## Error Messages
 
-    * A loop where the variable is reused: `for x in items { ... let y = x; ... }`
-    * Code with conditional reuse: `if flag { let _ = val; } let z = val;`
-* Compiler lints will help detect and suggest fixes.
-* Additional lints may help identify unnecessary uses of `.copy`.
+The compiler provides clear error messages for invalid `.copy` usage:
 
----
+```rust
+let vec = vec![1, 2, 3];
+let copy = vec.copy;
+// ERROR: the trait `Copy` is not implemented for `Vec<i32>`
+// HELP: consider using `vec.clone()` to create a deep copy
+```
 
-## Drawbacks
+## Corner Cases
 
-* **Slightly Increased Verbosity**: Code that reuses `Copy` values now must do so explicitly with `.copy`, even in simple arithmetic. However, this only applies where a value is used more than once — single-use values follow normal move semantics.
-* **Compiler Implementation Effort**: Primitive types are currently always treated as `Copy`, and the compiler may not track their move state at all. Supporting this change may require deeper changes to MIR and borrow checking to distinguish moves from copies even for scalars.
+### Borrowed Values
 
----
+`.copy` works on borrowed values without auto-dereferencing:
 
-## Alternatives
+```rust
+let x = &42;
+let y = x.copy; // copies the reference, not the value
+```
 
-### `copy x` Keyword
+### Temporary Values
+
+`.copy` can be applied to temporary values:
+
+```rust
+let result = create_point().copy.translate(1, 2);
+```
+
+# Drawbacks
+[drawbacks]: #drawbacks
+
+**Increased Verbosity**: Code that reuses `Copy` values must now do so explicitly with `.copy`. This adds syntactic overhead to common operations like arithmetic with variables.
+
+**Learning Curve**: Existing Rust developers must adapt to explicit copy syntax, which changes established patterns.
+
+**Compiler Implementation Complexity**: Primitive types are currently always treated as `Copy`, and the compiler may not track their move state. Supporting this change may require deeper changes to MIR and borrow checking to distinguish moves from copies even for scalars.
+
+**Potential for Overuse**: Developers might reflexively add `.copy` without considering whether a move would be more appropriate, potentially leading to unnecessary copies.
+
+# Rationale and alternatives
+[rationale-and-alternatives]: #rationale-and-alternatives
+
+## Why This Design?
+
+This design is the best because it:
+
+- **Provides Consistency**: Aligns with Rust's existing philosophy of making semantically important operations explicit (like `.await`, `?`, `unsafe`)
+- **Eliminates Surprises**: Removes the need to know which types are `Copy` to understand code behavior
+- **Improves Readability**: Makes ownership transfers visible in code
+- **Prevents Subtle Bugs**: Eliminates silent behavior changes when `Copy` is added or removed from types
+
+## Alternative Designs Considered
+
+### `copy x` Keyword Syntax
 
 ```rust
 let y = copy x;
 ```
 
-* Rejected due to awkward syntax, poor chaining, and need for a new keyword.
+**Rejected because:**
+- Requires a new keyword
+- Doesn't chain well with method calls
+- Less consistent with existing Rust syntax patterns
 
----
+### Auto-dereferencing `.copy`
 
-## Unresolved Questions
+Making `.copy` auto-dereference like method calls.
 
-1. **Pattern Matching**: Should `.copy` be allowed or required in match arms or destructuring? (We recommend explicit `.copy`, and leave pattern-level syntax to a future RFC.)
-2. **Diagnostics**: What compiler messages and suggestions should be shown?
-3. **Generics**: The compiler must enforce `T: Copy` bounds in generic contexts if `.copy` is used.
+**Rejected because:**
+- Creates ambiguity about whether you're copying a reference or the referenced value
+- Inconsistent with the goal of making ownership explicit
+- Adds complexity to the mental model
+
+### Status Quo (Keep Implicit Copy)
+
+**Rejected because:**
+- Maintains the action-at-a-distance problem
+- Keeps the cognitive burden of remembering which types are `Copy`
+- Doesn't align with Rust's general philosophy of explicit semantics
+
+## Impact of Not Doing This
+
+Without this change, Rust continues to have:
+- Implicit behavior that can silently change when traits are added/removed
+- Cognitive overhead in understanding which operations copy vs move
+- Difficulty in code review and performance analysis
+- Inconsistency with other explicit language features
+
+## Library vs Language
+
+This cannot be implemented as a library feature because it requires compiler support to:
+- Override default move semantics
+- Provide the `.copy` syntax
+- Integrate with the type system and borrow checker
+
+# Prior art
+[prior-art]: #prior-art
+
+TODO
+
+# Unresolved questions
+[unresolved-questions]: #unresolved-questions
+
+**Pattern Matching Syntax**: Should future RFCs introduce special syntax for copying in patterns (e.g., `match x { MyStruct { copy a, ref b } => ... }`)?
+
+**Diagnostic Quality**: What specific error messages and suggestions should the compiler provide for common mistakes?
+
+**Generic Bounds**: How should the compiler handle complex generic scenarios where `Copy` bounds might be inferred?
+
+**Performance Impact**: What is the compile-time cost of tracking move/copy semantics for all types, including primitives?
+
+**IDE Integration**: How should language servers and IDEs highlight copy operations to improve developer experience?
+
+# Future possibilities
+[future-possibilities]: #future-possibilities
+
+## Pattern Matching Extensions
+
+Future RFCs could introduce pattern-level copy syntax:
+
+```rust
+match point {
+    Point { copy x, copy y } => {
+        // x and y are copied automatically
+    }
+}
+```
+
+This would provide fine-grained control over ownership in pattern matching, similar to `ref` patterns.
+
+## Lint Extensions
+
+Additional lints could help identify:
+- Unnecessary uses of `.copy` where moves would suffice
+- Performance hotspots where many copies occur
+- Opportunities to restructure code to avoid copies
+
+## Generic Programming Enhancements
+
+The explicit copy syntax could enable more sophisticated generic programming patterns where copy vs move behavior is controlled by type parameters or associated types.
+
+## Tooling Integration
+
+Build tools could provide reports on copy frequency and performance impact, helping developers optimize their code.
+
+## Language Server Features
+
+IDEs could provide visual indicators for copy operations, making them even more visible during development.
+
+This change lays the foundation for a more explicit and predictable ownership model in Rust, while maintaining backward compatibility through edition-based migration.
